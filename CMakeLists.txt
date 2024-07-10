@@ -35,7 +35,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
-
+find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 ################################################################################
 # Build
 ################################################################################
@@ -59,6 +60,13 @@ ament_target_dependencies(sllidar_client
   std_srvs
   sensor_msgs
 )
+add_executable(pointcloudfilter src/pointcloudfilter.cpp)
+ament_target_dependencies(pointcloudfilter
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  visualization_msgs
+)
 ################################################################################
 # Install
 ################################################################################
@@ -67,7 +75,7 @@ install(DIRECTORY launch rviz
 )
 
 install(
-  TARGETS sllidar_node sllidar_client
+  TARGETS sllidar_node sllidar_client pointcloudfilter
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
