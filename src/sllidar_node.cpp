@@ -66,6 +66,7 @@ class SLlidarNode : public rclcpp::Node
   private:    
     void init_param()
     {
+// パラメータの宣言
         this->declare_parameter<std::string>("channel_type","serial");
         this->declare_parameter<std::string>("tcp_ip", "192.168.0.7");
         this->declare_parameter<int>("tcp_port", 20108);
@@ -79,6 +80,7 @@ class SLlidarNode : public rclcpp::Node
         this->declare_parameter<std::string>("scan_mode",std::string());
         this->declare_parameter<float>("scan_frequency",10);
         
+// パラメータの取得
         this->get_parameter_or<std::string>("channel_type", channel_type, "serial");
         this->get_parameter_or<std::string>("tcp_ip", tcp_ip, "192.168.0.7"); 
         this->get_parameter_or<int>("tcp_port", tcp_port, 20108);
@@ -90,6 +92,7 @@ class SLlidarNode : public rclcpp::Node
         this->get_parameter_or<bool>("inverted", inverted, false);
         this->get_parameter_or<bool>("angle_compensate", angle_compensate, false);
         this->get_parameter_or<std::string>("scan_mode", scan_mode, std::string());
+// `channel_type`が`udp`の場合、`scan_frequency`を20.0に、それ以外の場合は10.0に設定
         if(channel_type == "udp")
             this->get_parameter_or<float>("scan_frequency", scan_frequency, 20.0);
         else
@@ -101,17 +104,20 @@ class SLlidarNode : public rclcpp::Node
         sl_result     op_result;
         sl_lidar_response_device_info_t devinfo;
 
+// デバイス情報を取得
         op_result = drv->getDeviceInfo(devinfo);
         if (SL_IS_FAIL(op_result)) {
             if (op_result == SL_RESULT_OPERATION_TIMEOUT) {
+// タイムアウトエラーの場合のログメッセージ
                 RCLCPP_ERROR(this->get_logger(),"Error, operation time out. SL_RESULT_OPERATION_TIMEOUT! ");
             } else {
+// その他のエラーの場合のログメッセージ
                 RCLCPP_ERROR(this->get_logger(),"Error, unexpected error, code: %x",op_result);
             }
             return false;
         }
 
-        // print out the device serial number, firmware and hardware version number..
+// デバイスのシリアル番号、ファームウェアバージョン、およびハードウェアバージョンをログに出力
         char sn_str[37] = {'\0'}; 
         for (int pos = 0; pos < 16 ;++pos) {
             sprintf(sn_str + (pos * 2),"%02X", devinfo.serialnum[pos]);
@@ -126,6 +132,7 @@ class SLlidarNode : public rclcpp::Node
     {
         sl_result     op_result;
         sl_lidar_response_device_health_t healthinfo;
+// ヘルス情報を取得
         op_result = drv->getHealth(healthinfo);
         if (SL_IS_OK(op_result)) { 
             RCLCPP_INFO(this->get_logger(),"SLLidar health status : %d", healthinfo.status);
@@ -225,8 +232,8 @@ class SLlidarNode : public rclcpp::Node
 
         scan_msg->scan_time = scan_time;
         scan_msg->time_increment = scan_time / (double)(node_count-1);
-        scan_msg->range_min = 0.15;
-        scan_msg->range_max = max_distance;//8.0;
+        scan_msg->range_min = 0.15;//最小距離0.15
+        scan_msg->range_max = max_distance;//最大距離8.0
 
         scan_msg->intensities.resize(node_count);
         scan_msg->ranges.resize(node_count);

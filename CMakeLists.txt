@@ -35,7 +35,10 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
-
+find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(PCL REQUIRED)
 ################################################################################
 # Build
 ################################################################################
@@ -45,6 +48,12 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
 )
 
+include_directories(
+  ${PCL_INCLUDE_DIRS}
+)
+link_directories(
+  ${PCL_LIBRARY_DIRS}
+)
 add_executable(sllidar_node	src/sllidar_node.cpp ${SLLIDAR_SDK_SRC})
 # target_link_libraries(sllidar_node ${ament_cmake_LIBRARIES})
 ament_target_dependencies(sllidar_node
@@ -59,6 +68,25 @@ ament_target_dependencies(sllidar_client
   std_srvs
   sensor_msgs
 )
+
+add_executable(pointcloudfilter src/pointcloudfilter.cpp)
+# Link libraries
+target_link_libraries(pointcloudfilter
+  ${rclcpp_LIBRARIES}
+  ${sensor_msgs_LIBRARIES}
+  ${geometry_msgs_LIBRARIES}
+  ${visualization_msgs_LIBRARIES}
+  ${PCL_LIBRARIES}
+)
+ament_target_dependencies(pointcloudfilter
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  visualization_msgs
+)
+
+# OpenCVのリンクを追加
+target_link_libraries(pointcloudfilter ${OpenCV_LIBS})
 ################################################################################
 # Install
 ################################################################################
@@ -67,7 +95,7 @@ install(DIRECTORY launch rviz
 )
 
 install(
-  TARGETS sllidar_node sllidar_client
+  TARGETS sllidar_node sllidar_client pointcloudfilter
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
