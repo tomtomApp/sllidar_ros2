@@ -16,194 +16,144 @@ public:
         subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
             "/scan", 10, std::bind(&PointCloudFilter::filter_callback, this, std::placeholders::_1));
         publisher_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/Filtered/scan", 10);
-        marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/filtered_point_marker", 10);
+        marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/closest_point_marker", 10);
+        closest_point_publisher_ = this->create_publisher<geometry_msgs::msg::Point>("/closest_point", 10);
+        fov_marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fov_marker", 10);
 
-        //初期化
-        last_avg_x_ = 0.0; // 平均座標
-        last_avg_y_ = 0.0;
-        has_last_point_ = false;
-        marker_id_ = 0;
-        initial_scan_done_ = false; // 最初のフィルタリングのみtrue
-        threshold_ = 0.3; // 足の追跡時に使う閾値
-
-        // n秒後に軌跡を描く
-        drawing_timer_ = this->create_wall_timer(
-            std::chrono::seconds(100),
-            [this]() { start_drawing_ = true; });
+        // 初期化
+        threshold_ = 1.0; // 円の半径
+        forward_angle_min_ = -M_PI_2; // 前方の最小角度 (-90度)
+        forward_angle_max_ = M_PI_2;  // 前方の最大角度 (+90度)
+        num_points_ = 30; // 扇形を構成する頂点の数
     }
 
 private:
     void filter_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
         auto filtered_msg = sensor_msgs::msg::LaserScan(*msg);
+        float closest_distance = std::numeric_limits<float>::infinity();
+        float closest_x = 0.0;
+        float closest_y = 0.0;
 
-        if (!initial_scan_done_)
+        // 円の中にある前方の点群のみ表示
+        float center_x = 0.0; // 中心のX座標 (円の中心)
+        float center_y = 0.0; // 中心のY座標 (円の中心)
+
+        // フィルタリング処理と最も近い点の検索
+        for (size_t i = 0; i < msg->ranges.size(); ++i)
         {
-            // x[m]以上離れている点をフィルタリングする処理(初回のみ)
-            float sum_x = 0.0;
-            float sum_y = 0.0;
-            int count = 0;
-            int label = 0;
+            float angle = msg->angle_min + i * msg->angle_increment;
+            float x = msg->ranges[i] * cos(angle);
+            float y = msg->ranges[i] * sin(angle);
 
-            for (size_t i = 0; i < msg->ranges.size(); ++i)
+            // 前方の角度範囲内かつ閾値以内の点群のみ残す
+            if (angle >= forward_angle_min_ && angle <= forward_angle_max_)
             {
-                if (msg->ranges[i] < 0.2)
+                float distance = std::hypot(x - center_x, y - center_y);
+                if (distance > threshold_)
                 {
-                    float angle = msg->angle_min + i * msg->angle_increment; // 角度計算
-                    float x = msg->ranges[i] * cos(angle); // 座標計算
-                    float y = msg->ranges[i] * sin(angle);
-                    remembered_points_[label].emplace_back(x, y);
-                    sum_x += x;
-                    sum_y += y;
-                    count++;
+                    filtered_msg.ranges[i] = std::numeric_limits<float>::infinity(); // 閾値外ならフィルタリング
                 }
-                else
+                else if (distance < closest_distance)
                 {
-                    filtered_msg.ranges[i] = std::numeric_limits<float>::infinity(); // フィルタリング
+                    closest_distance = distance;
+                    closest_x = x;
+                    closest_y = y;
                 }
             }
-
-            if (count > 0)
+            else
             {
-                last_avg_x_ = sum_x / count;
-                last_avg_y_ = sum_y / count;
-                initial_scan_done_ = true; // 初回以降はスキップ
-            }
-        }
-        // 追跡する処理(初回以降)
-        else
-        {
-            // 記憶した点群のラベルを追跡してフィルタリング
-            for (size_t i = 0; i < msg->ranges.size(); ++i)
-            {
-                float angle = msg->angle_min + i * msg->angle_increment;
-                float x = msg->ranges[i] * cos(angle);
-                float y = msg->ranges[i] * sin(angle);
-                bool found = false;
-
-                for (const auto& [label, points] : remembered_points_)
-                {
-                    for (const auto& point : points)
-                    {
-                        if (std::hypot(point.first - x, point.second - y) < threshold_) // 記憶と現在(x, y)の距離<thresholdなら同値
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) break;
-                }
-
-                if (!found)
-                {
-                    filtered_msg.ranges[i] = std::numeric_limits<float>::infinity(); // 記憶と現在(x, y)の距離>thresholdならフィルタリング
-                }
-            }
-
-            // 平均座標を計算し直す
-            float sum_x = 0.0;
-            float sum_y = 0.0;
-            int count = 0;
-            for (size_t i = 0; i < filtered_msg.ranges.size(); ++i)
-            {
-                if (filtered_msg.ranges[i] < std::numeric_limits<float>::infinity()) // 生き残った点群に限定
-                {
-                    float angle = filtered_msg.angle_min + i * filtered_msg.angle_increment;
-                    float x = filtered_msg.ranges[i] * cos(angle);
-                    float y = filtered_msg.ranges[i] * sin(angle);
-                    sum_x += x;
-                    sum_y += y;
-                    count++;
-                }
-            }
-
-            if (count > 0)
-            {
-                float avg_x = sum_x / count;
-                float avg_y = sum_y / count;
-
-                // 記憶した点群の平均座標を更新
-                remembered_points_.clear();
-                remembered_points_[0].emplace_back(avg_x, avg_y);
-
-                // 平均座標を中心とした半径threshold_の円を描く
-                visualization_msgs::msg::Marker circle;
-                circle.header.frame_id = "laser";
-                circle.header.stamp = this->get_clock()->now();
-                circle.ns = "circle";
-                circle.id = 0;
-                circle.type = visualization_msgs::msg::Marker::LINE_STRIP;
-                circle.action = visualization_msgs::msg::Marker::ADD;
-                circle.scale.x = 0.01;
-                circle.color.a = 1.0;
-                circle.color.r = 1.0;
-                circle.color.g = 0.0;
-                circle.color.b = 0.0;
-
-                //円の外枠を描くための点を追加
-                const int num_points = 100; // 円を構成する点の数
-                for (int i = 0; i <= num_points; ++i)
-                {
-                    float angle = 2.0 * M_PI * i / num_points;
-                    geometry_msgs::msg::Point p;
-                    p.x = avg_x + threshold_ * cos(angle);
-                    p.y = avg_y + threshold_ * sin(angle);
-                    p.z = 0.0;
-                    circle.points.push_back(p);
-                }
-
-                marker_publisher_->publish(circle);
-
-                // 平均座標を繋いでいくことで軌跡を描く
-                if (has_last_point_ && start_drawing_)
-                {
-                    visualization_msgs::msg::Marker line;
-                    line.header.frame_id = "laser";
-                    line.header.stamp = this->get_clock()->now();
-                    line.ns = "trajectory";
-                    line.id = marker_id_++;
-                    line.type = visualization_msgs::msg::Marker::LINE_STRIP;
-                    line.action = visualization_msgs::msg::Marker::ADD;
-                    line.points.push_back(createPoint(last_avg_x_, last_avg_y_));
-                    line.points.push_back(createPoint(avg_x, avg_y));
-                    line.scale.x = 0.01; // 太さ
-                    line.color.a = 1.0; // 色
-                    line.color.r = 1.0;
-                    line.color.g = 0.0;
-                    line.color.b = 0.0;
-                    line.lifetime = rclcpp::Duration::from_seconds(5); // n秒後に消える
-                    marker_publisher_->publish(line);
-                }
-                last_avg_x_ = avg_x;
-                last_avg_y_ = avg_y;
-                has_last_point_ = true;
+                filtered_msg.ranges[i] = std::numeric_limits<float>::infinity(); // 後方の点群をフィルタリング
             }
         }
 
-        publisher_->publish(filtered_msg); // 処理したデータをpublish
-    }
+        // 最も近い点のマーカーを生成
+        visualization_msgs::msg::Marker closest_point_marker;
+        closest_point_marker.header.frame_id = "base_link"; // フレームIDは適切なものを指定
+        closest_point_marker.header.stamp = this->get_clock()->now();
+        closest_point_marker.ns = "closest_point";
+        closest_point_marker.id = 0;
+        closest_point_marker.type = visualization_msgs::msg::Marker::SPHERE;
+        closest_point_marker.action = visualization_msgs::msg::Marker::ADD;
+        closest_point_marker.pose.position.x = closest_x;
+        closest_point_marker.pose.position.y = closest_y;
+        closest_point_marker.pose.position.z = 0.0;
+        closest_point_marker.pose.orientation.w = 1.0;
+        closest_point_marker.scale.x = 0.1; // 球の大きさ
+        closest_point_marker.scale.y = 0.1;
+        closest_point_marker.scale.z = 0.1;
+        closest_point_marker.color.a = 1.0;
+        closest_point_marker.color.r = 0.0;
+        closest_point_marker.color.g = 0.0;
+        closest_point_marker.color.b = 1.0; // 青色
 
-    geometry_msgs::msg::Point createPoint(float x, float y)
-    {
-        geometry_msgs::msg::Point point;
-        point.x = x;
-        point.y = y;
-        point.z = 0.0;
-        return point;
+        // 最も近い点の座標をgeometry_msgs::msg::Pointとしてパブリッシュ
+        geometry_msgs::msg::Point closest_point;
+        closest_point.x = closest_x;
+        closest_point.y = closest_y;
+        closest_point.z = 0.0;
+        closest_point_publisher_->publish(closest_point);
+
+        // 視野を表すマーカーを生成
+        visualization_msgs::msg::Marker fov_marker;
+        fov_marker.header.frame_id = "base_link"; // フレームIDは適切なものを指定
+        fov_marker.header.stamp = this->get_clock()->now();
+        fov_marker.ns = "fov";
+        fov_marker.id = 1;
+        fov_marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST; // 視野を三角形リストとして定義
+        fov_marker.action = visualization_msgs::msg::Marker::ADD;
+        fov_marker.pose.orientation.w = 1.0;
+        fov_marker.scale.x = 1.0;
+        fov_marker.scale.y = 1.0;
+        fov_marker.scale.z = 0.1;
+        fov_marker.color.a = 0.5;
+        fov_marker.color.r = 1.0;
+        fov_marker.color.g = 1.0;
+        fov_marker.color.b = 0.0; // 半透明な黄色
+
+        // 視野マーカーの頂点を計算
+        geometry_msgs::msg::Point p0;
+        p0.x = 0.0;
+        p0.y = 0.0;
+        p0.z = 0.0;
+
+        std::vector<geometry_msgs::msg::Point> points;
+        float max_range = 1.0;
+        float angle_step = (forward_angle_max_ - forward_angle_min_) / num_points_;
+
+        for (size_t i = 0; i <= num_points_; ++i)
+        {
+            float angle = forward_angle_min_ + i * angle_step;
+            geometry_msgs::msg::Point p;
+            p.x = max_range * cos(angle);
+            p.y = max_range * sin(angle);
+            p.z = 0.0;
+            points.push_back(p);
+        }
+
+        // 三角形リストに頂点を追加
+        for (size_t i = 0; i < points.size() - 1; ++i)
+        {
+            fov_marker.points.push_back(p0);        // 基点
+            fov_marker.points.push_back(points[i]); // 扇形の左端
+            fov_marker.points.push_back(points[i + 1]); // 扇形の右端
+        }
+
+        // マーカーとフィルタリング結果をpublish
+        marker_publisher_->publish(closest_point_marker);
+        fov_marker_publisher_->publish(fov_marker);
+        publisher_->publish(filtered_msg);
     }
 
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscription_;
     rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr publisher_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_publisher_;
-    rclcpp::TimerBase::SharedPtr drawing_timer_;
-    float last_avg_x_;
-    float last_avg_y_;
-    bool has_last_point_;
-    bool start_drawing_ = false;
-    int marker_id_;
-    bool initial_scan_done_;
-    float threshold_;
-    std::unordered_map<int, std::vector<std::pair<float, float>>> remembered_points_;
+    rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr closest_point_publisher_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr fov_marker_publisher_;
+    float threshold_;     // 円の半径として使用
+    float forward_angle_min_; // 前方角度の最小値 (-90度)
+    float forward_angle_max_; // 前方角度の最大値 (+90度)
+    size_t num_points_; // 扇形の頂点数
 };
 
 int main(int argc, char *argv[])

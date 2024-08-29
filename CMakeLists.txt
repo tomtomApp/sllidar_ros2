@@ -4,6 +4,15 @@
 cmake_minimum_required(VERSION 3.5)
 project(sllidar_ros2)
 
+# Set CMake policies to avoid warnings
+if(POLICY CMP0144)
+  cmake_policy(SET CMP0144 NEW)
+endif()
+
+if(POLICY CMP0167)
+  cmake_policy(SET CMP0167 NEW)
+endif()
+
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
 endif()
@@ -39,6 +48,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED)
+
 ################################################################################
 # Build
 ################################################################################
@@ -54,6 +64,7 @@ include_directories(
 link_directories(
   ${PCL_LIBRARY_DIRS}
 )
+
 add_executable(sllidar_node	src/sllidar_node.cpp ${SLLIDAR_SDK_SRC})
 # target_link_libraries(sllidar_node ${ament_cmake_LIBRARIES})
 ament_target_dependencies(sllidar_node
@@ -87,6 +98,7 @@ ament_target_dependencies(pointcloudfilter
 
 # OpenCVのリンクを追加
 target_link_libraries(pointcloudfilter ${OpenCV_LIBS})
+
 ################################################################################
 # Install
 ################################################################################
@@ -107,3 +119,4 @@ ament_export_dependencies(std_msgs)
 ament_export_dependencies(sensor_msgs)
 ament_export_include_directories(include)
 ament_package()
+
