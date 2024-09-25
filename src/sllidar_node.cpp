@@ -442,7 +442,7 @@ public:
         // done!
         drv->setMotorSpeed(0);
         drv->stop();
-        RCLCPP_INFO(this->get_logger(),"Stop motor");
+        RCLCPP_INFO(this->get_logger(),"Not stop motor");
 
         return 0;
     }
