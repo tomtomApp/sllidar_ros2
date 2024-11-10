@@ -2,6 +2,7 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>  // 追加
 #include <std_msgs/msg/bool.hpp>
 #include <chrono>
 #include <vector>
@@ -17,13 +18,13 @@ public:
         subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
             "/scan", 10, std::bind(&PointCloudFilter::filter_callback, this, std::placeholders::_1));
         publisher_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/filtered/scan", 10);
-        marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/closest_point_marker", 10);
+        marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/closest_point_marker", 10);  // 型をMarkerArrayに変更
         closest_point_publisher_ = this->create_publisher<geometry_msgs::msg::Point>("/closest_point", 10);
         fov_marker_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fov_marker", 10);
         obstacle_detected_pub = this->create_publisher<std_msgs::msg::Bool>("obstacle_detected", 10);
 
         // 初期化
-        threshold_ = 0.5;          // 円の半径の上限
+        threshold_ = 1.0;          // 円の半径の上限
         min_threshold_ = 0.3;      // 円の半径の下限
         forward_angle_min_ = -M_PI / 4; // 前方の最小角度 (-45度)
         forward_angle_max_ = M_PI / 4;  // 前方の最大角度 (+45度)
@@ -104,15 +105,19 @@ private:
             closest_point_marker.color.g = 0.0;
             closest_point_marker.color.b = 1.0; // 青色
 
+            // MarkerArrayに追加
+            visualization_msgs::msg::MarkerArray marker_array;  // MarkerArrayを作成
+            marker_array.markers.push_back(closest_point_marker);
+
+            // マーカーをパブリッシュ
+            marker_publisher_->publish(marker_array);
+
             // 最も近い点の座標をgeometry_msgs::msg::Pointとしてパブリッシュ
             geometry_msgs::msg::Point closest_point;
             closest_point.x = closest_x;
             closest_point.y = closest_y;
             closest_point.z = 0.0;
             closest_point_publisher_->publish(closest_point);
-
-            // マーカーをパブリッシュ
-            marker_publisher_->publish(closest_point_marker);
         }
         else
         {
@@ -124,13 +129,20 @@ private:
             delete_marker.id = 0;
             delete_marker.action = visualization_msgs::msg::Marker::DELETE;
 
-            marker_publisher_->publish(delete_marker);
+            // MarkerArrayに追加
+            visualization_msgs::msg::MarkerArray marker_array;  // MarkerArrayを作成
+            marker_array.markers.push_back(delete_marker);
+
+            // マーカーをパブリッシュ
+            marker_publisher_->publish(marker_array);
         }
 
         // obstacle_detectedをパブリッシュ
         std_msgs::msg::Bool obstacle_msg;
         obstacle_msg.data = obstacle_detected;
         obstacle_detected_pub->publish(obstacle_msg);
+
+        // 以下、他のコードはそのまま
 
         // カラー設定
         std_msgs::msg::ColorRGBA green_color;
@@ -226,7 +238,7 @@ private:
 
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscription_;
     rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr publisher_;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_publisher_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_publisher_;  // 型をMarkerArrayに変更
     rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr closest_point_publisher_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr fov_marker_publisher_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr obstacle_detected_pub;
